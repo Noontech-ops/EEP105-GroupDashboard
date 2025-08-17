@@ -45,7 +45,7 @@ def load_excel_first_sheet(url: str) -> Optional[pd.DataFrame]:
 	return None
 
 @st.cache_data(show_spinner=False)
-def load_wdi_indicator_long(url: str, indicator_match: str) -> Optional[pd.DataFrame]:
+def load_wdi_indicator_long(url: str, indicator_name_contains: Optional[str] = None, indicator_code_equals: Optional[str] = None) -> Optional[pd.DataFrame]:
 	last_error: Optional[Exception] = None
 	attempts = [
 		{"engine": "python"},
@@ -68,13 +68,20 @@ def load_wdi_indicator_long(url: str, indicator_match: str) -> Optional[pd.DataF
 
 			country_name_col = find_col("country name")
 			indicator_name_col = find_col("indicator name")
+			indicator_code_col = find_col("indicator code")
 			# If not a WDI wide file, bail out
 			if not country_name_col or not indicator_name_col:
 				continue
 
-			# Filter indicator rows
-			mask = df[indicator_name_col].astype(str).str.contains(indicator_match, case=False, na=False)
-			if not mask.any():
+			mask = None
+			if indicator_name_contains:
+				mask_name = df[indicator_name_col].astype(str).str.contains(indicator_name_contains, case=False, na=False)
+				mask = mask_name if mask is None else (mask | mask_name)
+			if indicator_code_equals and indicator_code_col:
+				mask_code = df[indicator_code_col].astype(str).str.strip() == indicator_code_equals
+				mask = mask_code if mask is None else (mask | mask_code)
+
+			if mask is None or not mask.any():
 				continue
 			df = df[mask].copy()
 
@@ -142,7 +149,11 @@ with section_tabs[0]:
 # 2) Global GDP
 with section_tabs[1]:
 	st.subheader("Global GDP")
-	df_gdp = load_wdi_indicator_long(BASE + "glb_gdp.csv", "GDP per capita")
+	df_gdp = load_wdi_indicator_long(
+		BASE + "glb_gdp.csv",
+		indicator_name_contains="GDP per capita",
+		indicator_code_equals="NY.GDP.PCAP.CD",
+	)
 	if df_gdp is not None and not df_gdp.empty and all(c in df_gdp.columns for c in ["country", "year", "value"]):
 		available_countries = sorted(c for c in df_gdp["country"].dropna().unique() if isinstance(c, str))
 		default_countries = [c for c in ["World", "United States", "China", "India", "Pakistan"] if c in available_countries][:3]
@@ -160,7 +171,11 @@ with section_tabs[1]:
 # 3) Energy Use
 with section_tabs[2]:
 	st.subheader("Energy Use")
-	df_energy = load_wdi_indicator_long(BASE + "ene_cosp.csv", "Energy use (kg of oil equivalent per capita)")
+	df_energy = load_wdi_indicator_long(
+		BASE + "ene_cosp.csv",
+		indicator_name_contains="Energy use",
+		indicator_code_equals="EG.USE.PCAP.KG.OE",
+	)
 	if df_energy is not None and not df_energy.empty and all(c in df_energy.columns for c in ["country", "year", "value"]):
 		available_countries = sorted(c for c in df_energy["country"].dropna().unique() if isinstance(c, str))
 		default_countries = [c for c in ["World", "United States", "China", "India", "Pakistan"] if c in available_countries][:3]
