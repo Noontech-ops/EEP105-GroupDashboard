@@ -44,6 +44,57 @@ def load_excel_first_sheet(url: str) -> Optional[pd.DataFrame]:
 		return None
 	return None
 
+@st.cache_data(show_spinner=False)
+def load_wdi_indicator_long(url: str, indicator_match: str) -> Optional[pd.DataFrame]:
+	last_error: Optional[Exception] = None
+	attempts = [
+		{"engine": "python"},
+		{"engine": "python", "on_bad_lines": "skip"},
+		{"engine": "python", "skiprows": 2},
+		{"engine": "python", "skiprows": 4},
+		{"engine": "python", "skiprows": 2, "on_bad_lines": "skip"},
+		{"engine": "python", "skiprows": 4, "on_bad_lines": "skip"},
+	]
+	for kwargs in attempts:
+		try:
+			df = pd.read_csv(url, **kwargs)
+			# Identify key columns case-insensitively
+			def find_col(name: str) -> Optional[str]:
+				lower = name.lower()
+				for c in df.columns:
+					if isinstance(c, str) and c.strip().lower() == lower:
+						return c
+				return None
+
+			country_name_col = find_col("country name")
+			indicator_name_col = find_col("indicator name")
+			# If not a WDI wide file, bail out
+			if not country_name_col or not indicator_name_col:
+				continue
+
+			# Filter indicator rows
+			mask = df[indicator_name_col].astype(str).str.contains(indicator_match, case=False, na=False)
+			if not mask.any():
+				continue
+			df = df[mask].copy()
+
+			# Collect year columns
+			year_cols = [c for c in df.columns if isinstance(c, str) and c.strip().isdigit()]
+			if not year_cols:
+				continue
+
+			id_cols = [c for c in [country_name_col] if c in df.columns]
+			long_df = df.melt(id_vars=id_cols, value_vars=year_cols, var_name="year", value_name="value")
+			long_df["year"] = pd.to_numeric(long_df["year"], errors="coerce")
+			long_df["value"] = pd.to_numeric(long_df["value"], errors="coerce")
+			long_df = long_df.rename(columns={country_name_col: "country"})
+			long_df = long_df.dropna(subset=["year"]).sort_values(["country", "year"]).reset_index(drop=True)
+			return long_df
+		except Exception as e:
+			last_error = e
+	st.warning(f"Could not parse WDI-style CSV from {url}: {last_error}")
+	return None
+
 BASE = "https://raw.githubusercontent.com/Veto1oox/GroupProjEEP105/main/"
 
 st.title("EEP105 Group Dashboard")
@@ -91,48 +142,38 @@ with section_tabs[0]:
 # 2) Global GDP
 with section_tabs[1]:
 	st.subheader("Global GDP")
-	df_gdp = load_csv(BASE + "glb_gdp.csv")
-	if df_gdp is not None and not df_gdp.empty:
-		country_col = "country" if "country" in df_gdp.columns else None
-		year_col = "year" if "year" in df_gdp.columns else None
-		value_col_candidates = ["gdp", "GDP", "value"]
-		value_col = next((c for c in value_col_candidates if c in df_gdp.columns), None)
-
-		if country_col and year_col and value_col:
-			available_countries = sorted(c for c in df_gdp[country_col].dropna().unique() if isinstance(c, str))
-			default_countries = [c for c in ["World", "United States", "China", "India", "Pakistan"] if c in available_countries][:3]
-			selected_countries = st.multiselect("Select countries", options=available_countries, default=default_countries, key="gdp_countries")
-
-			if selected_countries:
-				filtered = df_gdp[df_gdp[country_col].isin(selected_countries)].copy()
-				pivot = filtered.pivot_table(index=year_col, columns=country_col, values=value_col, aggfunc="sum").sort_index()
-				st.line_chart(pivot)
-				st.dataframe(filtered[[country_col, year_col, value_col]].sort_values([country_col, year_col]).tail(1000))
-			else:
-				st.info("Select at least one country to view the time series.")
+	df_gdp = load_wdi_indicator_long(BASE + "glb_gdp.csv", "GDP per capita")
+	if df_gdp is not None and not df_gdp.empty and all(c in df_gdp.columns for c in ["country", "year", "value"]):
+		available_countries = sorted(c for c in df_gdp["country"].dropna().unique() if isinstance(c, str))
+		default_countries = [c for c in ["World", "United States", "China", "India", "Pakistan"] if c in available_countries][:3]
+		selected_countries = st.multiselect("Select countries", options=available_countries, default=default_countries, key="gdp_countries")
+		if selected_countries:
+			filtered = df_gdp[df_gdp["country"].isin(selected_countries)].copy()
+			pivot = filtered.pivot_table(index="year", columns="country", values="value", aggfunc="mean").sort_index()
+			st.line_chart(pivot)
+			st.dataframe(filtered.tail(1000))
 		else:
-			st.dataframe(df_gdp.head(1000))
-			st.info("Displayed first rows because expected columns were not found.")
+			st.info("Select at least one country to view the time series.")
 	else:
-		st.info("GDP dataset could not be loaded.")
+		st.info("GDP dataset could not be loaded or parsed.")
 
 # 3) Energy Use
 with section_tabs[2]:
 	st.subheader("Energy Use")
-	df_energy = load_csv(BASE + "ene_cosp.csv")
-	if df_energy is not None and not df_energy.empty:
-		year_col = "year" if "year" in df_energy.columns else None
-		if year_col:
-			# Show the sum across numeric columns by year as a simple overview
-			numeric_cols = [c for c in df_energy.columns if pd.api.types.is_numeric_dtype(df_energy[c])]
-			if numeric_cols:
-				agg = df_energy.groupby(year_col)[numeric_cols].sum().sort_index()
-				st.line_chart(agg)
-			st.dataframe(df_energy.head(1000))
+	df_energy = load_wdi_indicator_long(BASE + "ene_cosp.csv", "Energy use (kg of oil equivalent per capita)")
+	if df_energy is not None and not df_energy.empty and all(c in df_energy.columns for c in ["country", "year", "value"]):
+		available_countries = sorted(c for c in df_energy["country"].dropna().unique() if isinstance(c, str))
+		default_countries = [c for c in ["World", "United States", "China", "India", "Pakistan"] if c in available_countries][:3]
+		selected_countries = st.multiselect("Select countries", options=available_countries, default=default_countries, key="energy_countries")
+		if selected_countries:
+			filtered = df_energy[df_energy["country"].isin(selected_countries)].copy()
+			pivot = filtered.pivot_table(index="year", columns="country", values="value", aggfunc="mean").sort_index()
+			st.line_chart(pivot)
+			st.dataframe(filtered.tail(1000))
 		else:
-			st.dataframe(df_energy.head(1000))
+			st.info("Select at least one country to view the time series.")
 	else:
-		st.info("Energy dataset could not be loaded.")
+		st.info("Energy dataset could not be loaded or parsed.")
 
 # 4) Pakistan Temperature
 with section_tabs[3]:
