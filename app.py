@@ -39,7 +39,7 @@ def load_excel_first_sheet(url: str) -> Optional[pd.DataFrame]:
 			for sheet_df in obj.values():
 				if isinstance(sheet_df, pd.DataFrame):
 					return sheet_df
-		except Exception as e:
+	except Exception as e:
 		st.warning(f"Could not load Excel from {url}: {e}")
 		return None
 	return None
@@ -175,13 +175,13 @@ with section_tabs[5]:
 	)
 	st.markdown("**Primary data sources (GitHub raw):**")
 	st.code(
-		"\n".join([
-			BASE + "co2_pcap_cons.csv",
-			BASE + "co2-fossil-plus-land-use.csv",
-			BASE + "pak_ind_irn_disasters.xlsx",
-			BASE + "glb_gdp.csv",
-			BASE + "ene_cosp.csv",
-			BASE + "pak_min_max_temp.xlsx",
-		])
+		"""
+		BASE + "co2_pcap_cons.csv",
+		BASE + "co2-fossil-plus-land-use.csv",
+		BASE + "pak_ind_irn_disasters.xlsx",
+		BASE + "glb_gdp.csv",
+		BASE + "ene_cosp.csv",
+		BASE + "pak_min_max_temp.xlsx",
+		"""
 	)
 	st.markdown("Run locally: `pip install -r requirements.txt && streamlit run app.py`")
