@@ -1,0 +1,17 @@
+# Move into your project folder
+cd /path/to/eep105-groupdashboard
+
+# Initialize git
+git init
+
+# Add your files
+git add .
+
+# Commit changes
+git commit -m "Initial commit"
+
+# Add GitHub repo (replace with your actual repo URL)
+git remote add origin https://github.com/YOUR_USERNAME/eep105-groupdashboard.git
+
+# Push code to GitHub
+git push -u origin main
