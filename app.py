@@ -1,28 +1,48 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-from typing import Optional
+from typing import Optional, Dict, Any
 
 st.set_page_config(page_title="EEP105 Group Dashboard", page_icon="📊", layout="wide")
 
-# Reusable data loaders
+# Robust data loaders
 @st.cache_data(show_spinner=False)
 def load_csv(url: str) -> Optional[pd.DataFrame]:
-	try:
-		df = pd.read_csv(url)
-		return df
-	except Exception as e:
-		st.warning(f"Could not load CSV from {url}: {e}")
-		return None
+	last_error: Optional[Exception] = None
+	# Try a few strategies to handle messy CSVs
+	strategies: list[Dict[str, Any]] = [
+		{},
+		{"engine": "python"},
+		{"engine": "python", "on_bad_lines": "skip"},
+		{"engine": "python", "sep": ";", "on_bad_lines": "skip"},
+		{"engine": "python", "sep": "\t", "on_bad_lines": "skip"},
+	]
+	for kwargs in strategies:
+		try:
+			df = pd.read_csv(url, **kwargs)
+			return df
+		except Exception as e:
+			last_error = e
+	st.warning(f"Could not load CSV from {url}: {last_error}")
+	return None
 
 @st.cache_data(show_spinner=False)
-def load_excel(url: str, sheet_name: Optional[str] = None) -> Optional[pd.DataFrame]:
+def load_excel_first_sheet(url: str) -> Optional[pd.DataFrame]:
 	try:
-		df = pd.read_excel(url, sheet_name=sheet_name)
-		return df
-	except Exception as e:
+		obj = pd.read_excel(url, sheet_name=None)
+		if isinstance(obj, dict) and obj:
+			# Pick the first non-empty DataFrame
+			for sheet_name, sheet_df in obj.items():
+				if isinstance(sheet_df, pd.DataFrame) and not sheet_df.empty:
+					return sheet_df
+			# Fallback: return any DataFrame even if empty
+			for sheet_df in obj.values():
+				if isinstance(sheet_df, pd.DataFrame):
+					return sheet_df
+		except Exception as e:
 		st.warning(f"Could not load Excel from {url}: {e}")
 		return None
+	return None
 
 BASE = "https://raw.githubusercontent.com/Veto1oox/GroupProjEEP105/main/"
 
@@ -66,7 +86,7 @@ with section_tabs[0]:
 			st.dataframe(df_emissions.head(1000))
 			st.info("Displayed first rows because expected columns were not found.")
 	else:
-		st.stop()
+		st.info("Emissions dataset could not be loaded.")
 
 # 2) Global GDP
 with section_tabs[1]:
@@ -93,6 +113,8 @@ with section_tabs[1]:
 		else:
 			st.dataframe(df_gdp.head(1000))
 			st.info("Displayed first rows because expected columns were not found.")
+	else:
+		st.info("GDP dataset could not be loaded.")
 
 # 3) Energy Use
 with section_tabs[2]:
@@ -109,24 +131,28 @@ with section_tabs[2]:
 			st.dataframe(df_energy.head(1000))
 		else:
 			st.dataframe(df_energy.head(1000))
+	else:
+		st.info("Energy dataset could not be loaded.")
 
 # 4) Pakistan Temperature
 with section_tabs[3]:
 	st.subheader("Pakistan Min/Max Temperature")
-	df_temp = load_excel(BASE + "pak_min_max_temp.xlsx")
-	if df_temp is not None and not df_temp.empty:
+	df_temp = load_excel_first_sheet(BASE + "pak_min_max_temp.xlsx")
+	if isinstance(df_temp, pd.DataFrame) and not df_temp.empty:
 		year_col = "year" if "year" in df_temp.columns else None
 		numeric_cols = [c for c in df_temp.columns if pd.api.types.is_numeric_dtype(df_temp[c])]
 		if year_col and numeric_cols:
 			agg = df_temp.groupby(year_col)[numeric_cols].mean().sort_index()
 			st.line_chart(agg)
 		st.dataframe(df_temp.head(1000))
+	else:
+		st.info("Temperature dataset could not be loaded.")
 
 # 5) Disasters
 with section_tabs[4]:
 	st.subheader("Reported Disasters: Pakistan, India, Iran")
-	df_disasters = load_excel(BASE + "pak_ind_irn_disasters.xlsx")
-	if df_disasters is not None and not df_disasters.empty:
+	df_disasters = load_excel_first_sheet(BASE + "pak_ind_irn_disasters.xlsx")
+	if isinstance(df_disasters, pd.DataFrame) and not df_disasters.empty:
 		year_col = "year" if "year" in df_disasters.columns else None
 		if year_col:
 			numeric_cols = [c for c in df_disasters.columns if pd.api.types.is_numeric_dtype(df_disasters[c])]
@@ -134,6 +160,8 @@ with section_tabs[4]:
 				agg = df_disasters.groupby(year_col)[numeric_cols].sum().sort_index()
 				st.line_chart(agg)
 		st.dataframe(df_disasters.head(1000))
+	else:
+		st.info("Disasters dataset could not be loaded.")
 
 # 6) About/Data Sources
 with section_tabs[5]:
